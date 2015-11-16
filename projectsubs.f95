@@ -18,16 +18,16 @@ module projectsubs
         deallocate(seed)
     end subroutine
 
-    subroutine initializepolymer(r,omega,k,stride)
+    subroutine initializepolymer(r,omega,k_stride,stride,r_e)
         implicit none
         real(8),allocatable,dimension(:,:)   :: r
         real(8),allocatable,dimension(:,:,:) :: omega
-        real(8)                              :: randnum
-        integer                              :: i, j, k, l, stride, randint
+        real(8)                              :: randnum, r_e
+        integer                              :: i, j, k, k_stride, l, stride, randint
 
 
 
-        do l = 1, k
+        10 do l = 1, k_stride
             r(1,:) = (/ 0, 0, 0 /)
             call random_number(randnum)
             if(randnum > 0 .and. randnum < (1./6)) then
@@ -47,7 +47,7 @@ module projectsubs
             omega(l,1,:) = (/ 0, 0, 0 /)
             omega(l,2,:) = r(2,:)
 
-            10 do i = 3, stride
+            do i = 3, stride
                 20 call random_number(randnum)
                 if(randnum > 0 .and. randnum < (1./6)) then
                     r(i,:) = r(i-1,:) + (/ 1, 0, 0 /)
@@ -75,6 +75,7 @@ module projectsubs
                     if(r(i,1) == r(j,1) .and. i /= j) then
                         if(r(i,2) == r(j,2) .and. i /= j) then
                             if(r(i,3) == r(j,3) .and. i /= j) then
+                                call init_random_seed()
                                 go to 10
                             end if
                         end if
@@ -85,10 +86,10 @@ module projectsubs
         end do
 
         call random_number(randnum)
-        randint = ceiling(randnum*k)
+        randint = ceiling(randnum*k_stride)
         r(1:stride,:) = omega(randint,1:stride,:)
         call random_number(randnum)
-        randint = ceiling(randnum*k)
+        randint = ceiling(randnum*k_stride)
         r(stride+1:2*stride,:) = omega(randint,:,:)
         do i = 1, stride
             r(stride+l,:) = r(stride+l,:) + r(stride,:)
@@ -121,9 +122,9 @@ module projectsubs
         end if
 
 
-        30 do i = 3, k
+        do i = 3, k_stride
             call random_number(randnum)
-            randint = ceiling(randnum*k)
+            randint = ceiling(randnum*k_stride)
             r(((i-1)*stride)+1:i*stride,:) = omega(randint,:,:)
             do j = 1, stride
                 r(((i-1)*stride)+j,:) = r(((i-1)*stride)+j,:) + r((i-1)*stride,:)
@@ -155,16 +156,113 @@ module projectsubs
                 end do
             end if
 
-            do j=1, i
-                if(r(i,1) == r(j,1) .and. i /= j) then
-                    if(r(i,2) == r(j,2) .and. i /= j) then
-                        if(r(i,3) == r(j,3) .and. i /= j) then
-                            go to 30
+            do j=1, i*stride
+                do k=j+1, i*stride
+                    if(r(k,1) == r(j,1)) then
+                        if(r(k,2) == r(j,2)) then
+                            if(r(k,3) == r(j,3)) then
+                                call init_random_seed()
+                                go to 10
+                            end if
                         end if
                     end if
-                end if
+                end do
             end do
+        end do
+
+        do i=1, k_stride * stride
+            r(i,:) = r(i,:) * r_e
+        end do
 
     end subroutine
-end module
 
+    subroutine potential(U,U_i,U_i_temp,d,d_temp,j,k,r,sigma,epsil,N)
+        implicit none
+        real(8),allocatable,dimension(:,:) :: U, U_i, U_i_temp, d, d_temp, r
+        real(8)                            :: sigma, epsil
+        integer                            :: N, j, k
+
+        call ljpotential(U,U_i,U_i_temp,d,d_temp,j,k,r,sigma,epsil,N)
+!        call morsepotential()
+!        call bendingpotential()
+
+    end subroutine
+
+    subroutine ljpotential(U,U_i,U_i_temp,d,d_temp,j,k,r,sigma,epsil,N)
+        implicit none
+
+        real(8),allocatable,dimension(:,:)  :: U, U_i, U_i_temp, d, d_temp, r
+        real(8)                             :: sigma, epsil
+        integer                             :: j, k, l, m, N
+
+        if(j == 0) then
+            U(0,1) = 0
+            do l = 1, N-1
+                do m = l+1, N
+                    call distance(l,m,d,r,U_i,sigma,epsil)
+                    U(0,1) = U(0,1) + U_i(l,m)
+!                    print*, U(0,1),U_i(l,m), d(l,m)
+                end do
+            end do
+        else
+            if(j==1 .and. k==1) then
+                U(j,k) = U(0,1)
+            else if(k==1) then
+                U(j,k) = U(j-1,N)
+            else
+                U(j,k) = U(j,k-1)
+            end if
+
+            U_i_temp = U_i
+            d_temp = d
+
+            do m = k+1, N
+                call distance(k,m,d,r,U_i,sigma,epsil)
+                U(j,k) = U(j,k) + U_i(k,m) - U_i_temp(k,m)
+            end do
+
+        end if
+    end subroutine
+
+!    subroutine morsepotential(N)
+!        implicit none
+!        integer :: i, N
+!
+!        do i = 1, N-1
+!            U_morse = U_morse + D * (1 - exp(-alpha*(r()-r_e))) ** 2
+!        end do
+!
+!    end subroutine
+
+!    subroutine bendingpotential()
+!        implicit none
+!        integer :: i, N
+!
+!        do i = 1, N-2
+!            U_theta = U_theta + 0.5 * k_theta * (cos(theta()) - cos(theta_0)) ** 2
+!        end do
+!    end subroutine
+
+    subroutine distance(l,m,d,r,U_i,sigma,epsil)
+        implicit none
+        real(8),allocatable,dimension(:,:) :: U_i, r, d
+        real(8)                            :: sigma, epsil, dx, dy, dz
+        integer                            :: l, m
+
+        dx = r(l,1) - r(m,1)
+        dy = r(l,2) - r(m,2)
+        dz = r(l,3) - r(m,3)
+        if(dx == 0 .and. dy == 0 .and. dz == 0) then
+            print*, 'distance equals zero'
+            print*, r(l,:), r(m,:), l, m
+            stop
+        end if
+
+        d(l,m) = sqrt(dx**2 + dy**2 + dz**2)
+
+        U_i(l,m) = 2 * epsil  * (((sigma/d(l,m))**9)) - 1.5*(((sigma/d(l,m))**6))
+
+
+    end subroutine
+
+end module
